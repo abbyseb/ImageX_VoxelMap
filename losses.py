@@ -84,19 +84,78 @@ class centroid_error:
         ap = ap_tar - ap_pre
         return lr, si, ap
 
+# class centroid_ptv:
+#     """
+#     Computes the lr,si,ap position of a binary mask
+#     """
+#
+#     def loss(self, mask):
+#         metric_input = mask.cpu().detach().numpy()
+#         mask = np.asarray(metric_input[0][:][:][:][0], dtype=np.float32)
+#         ind = np.nonzero(mask)
+#
+#         lr = int(np.mean(ind[0]))
+#         si = int(np.mean(ind[1]))
+#         ap = int(np.mean(ind[2]))
+#
+#         return lr, si, ap
+
 class centroid_ptv:
     """
-    Computes the lr,si,ap position of a binary mask
+    Computes LR, SI, AP centroid of a (binary or soft) 3D mask.
+
+    - Returns FLOAT voxel coordinates (sub-voxel).
+    - Works on torch tensors directly (no numpy round-trips).
+    - Handles empty masks safely (returns NaNs by default).
     """
 
-    def loss(self, mask):
-        metric_input = mask.cpu().detach().numpy()
-        mask = np.asarray(metric_input[0][:][:][:][0], dtype=np.float32)
-        ind = np.nonzero(mask)
+    def __init__(self, threshold: float = 0.0, empty_value=float("nan")):
+        """
+        Args:
+            threshold: voxels > threshold are treated as 'in mask' for binary centroid.
+                       If your mask is soft/probabilistic, keep threshold=0 and it will
+                       behave like binary unless you change it.
+            empty_value: value returned for lr/si/ap if mask is empty.
+        """
+        self.threshold = threshold
+        self.empty_value = empty_value
 
-        lr = int(np.mean(ind[0]))
-        si = int(np.mean(ind[1]))
-        ap = int(np.mean(ind[2]))
+    @torch.no_grad()
+    def loss(self, mask: torch.Tensor):
+        """
+        Args:
+            mask: tensor shaped (B, 1, D, H, W) or (1, D, H, W) or (D, H, W)
+                  Values can be {0,1} or soft.
+
+        Returns:
+            (lr, si, ap) as python floats in voxel coordinates.
+            NOTE: These correspond to indices along (D, H, W) respectively.
+        """
+        # Normalize shape to (D,H,W)
+        if mask.dim() == 5:
+            m = mask[0, 0]
+        elif mask.dim() == 4:
+            m = mask[0]
+        elif mask.dim() == 3:
+            m = mask
+        else:
+            raise ValueError(f"Unexpected mask shape {tuple(mask.shape)}")
+
+        # Binary support for centroid (keeps behaviour consistent with your previous code)
+        m_bin = (m > self.threshold)
+
+        # If empty, return NaNs (or configured value)
+        if not torch.any(m_bin):
+            v = float(self.empty_value)
+            return v, v, v
+
+        # Get coordinates of non-zero voxels: (N,3) with columns [D,H,W]
+        coords = m_bin.nonzero(as_tuple=False).float()
+
+        # Mean coordinate = centroid in voxel units (sub-voxel)
+        lr = coords[:, 0].mean().item()
+        si = coords[:, 1].mean().item()
+        ap = coords[:, 2].mean().item()
 
         return lr, si, ap
 
