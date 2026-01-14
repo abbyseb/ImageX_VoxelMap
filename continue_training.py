@@ -97,13 +97,16 @@ def plot_losses(
     val_losses: List[float],
     hours: int,
     minutes: int,
+    DatasetType: str,
+    NetworkType: str,
+    Patient_number: str,
 ) -> str:
     """
     Writes plots/<filename>.png and returns its path.
     Curve length matches total history, so it continues when you resume.
     """
     os.makedirs(plot_dir, exist_ok=True)
-    plot_path = os.path.join(plot_dir, f"{filename}.png")
+    plot_path = os.path.join(plot_dir,f"{DatasetType}_{NetworkType}_{Patient_number}_TRAINvsVAL.png")
 
     n = len(train_losses)
     xs = np.arange(1, n + 1)
