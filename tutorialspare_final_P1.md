@@ -1,4 +1,4 @@
-# Medical Imaging Analysis Pipeline: Patient P1 (tutorialspare_final_P1)
+# Voxel Map Training/Testing Model A Pipeline for SPARE DATA: Patient P1 
 
 This repository contains the `tutorialspare_final_P1.ipynb` notebook, which implements a deep learning workflow for 3D medical image analysis. The pipeline is designed specifically for **Patient P1** and handles data loading, model training (with resume capabilities), and comprehensive evaluation using medical imaging metrics.
 
