@@ -43,7 +43,7 @@ This notebook is a tutorial which implements a deep learning-based motion tracki
    - Patient: `P1`.
    - Dataset: `SPARE`.
    - Training: Day 1, No Scatter (`MC_V_P1_NS_01`).
-   - Testing: Day 1, No Scatter.
+   - Testing: Day 2, Scatter.
 
 3. **Run the cells sequentially** to train and evaluate the model.
 
@@ -53,7 +53,7 @@ This notebook is a tutorial which implements a deep learning-based motion tracki
 
 The training process involves:
 1. Loading 3D CT volumes and 2D X-ray projections.
-2. Training Network A (3D U-Net base) to predict the DVF that maps the source volume to the target state.
+2. Training Network "A" to predict the DVF that maps the source volume to the target state.
 3. Saving model checkpoints and training logs.
 
 ---
@@ -112,9 +112,8 @@ Located in `utilities/` directory (not shown in notebook):
 **Loss curves should show:**
 - Steady decrease in training loss.
 - Validation loss plateaus around epoch 40-50.
-- Typical final losses after 50 epochs: Train ~0.0119, Val ~0.0125.
 
 ### Evaluation Metrics
-- **Dice Score:** Expected > 0.85 for successful tracking.
-- **Centroid Shift:** Should be minimized (measured in mm).
-- **Jacobian Determinant:** Should remain positive (0.5 to 1.5) to ensure topology preservation.
+- **Dice Score**
+- **Centroid Shift** 
+- **Jacobian Determinant** 
