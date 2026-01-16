@@ -2,7 +2,7 @@
 
 ## Overview
 
-This notebook is a tutorial which implements a deep learning-based motion tracking system for radiotherapy treatment. It trains **Network A** to predict deformation vector fields (DVFs) from X-ray projections and CT volumes, enabling real-time tumor tracking during radiation therapy. This work and code is from Dr Nicholas Hindley's VoxelMap : https://github.com/Image-X-Institute/Voxelmap
+This notebook is a tutorial which implements a deep learning-based motion tracking system for radiotherapy treatment. It trains **Network A** to predict deformation vector fields (DVFs) from X-ray projections and CT volumes, enabling real-time tumor tracking during radiation therapy. This work and code is based on Dr Nicholas Hindley's VoxelMap : https://github.com/Image-X-Institute/Voxelmap
 
 **Key Features:**
 - Train a neural network to predict 3D motion from 2D projections
