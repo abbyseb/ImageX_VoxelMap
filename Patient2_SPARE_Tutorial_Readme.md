@@ -236,7 +236,7 @@ Located in: `/srv/shared/SPARE/MC_V_P2_NS_01/`
 | `subCT_06_mha.npy` | Reference CT volume (phase 06) | 128×128×128 |
 | `DVF_XX_mha.npy` | Ground-truth deformation fields | 128×128×128×3 |
 | `sub_Abdomen_mha.npy` | Thoracoabdominal mask | 128×128×128 |
-| `sub_PTV_mha.npy` | Planning target volume (source) | 128×128×128 |
+| `itv_PTV_mha.npy` | Planning target volume (source) | 128×128×128 |
 
 #### Testing Data (Day 2, With Scatter)
 Located in: `/srv/shared/SPARE/MC_V_P2_SC_02/`
@@ -247,7 +247,7 @@ Located in: `/srv/shared/SPARE/MC_V_P2_SC_02/`
 | `06_Proj_XXXXX_bin.npy` | Reference projection (in `source/`) | Network input |
 | `subCT_XX_mha.npy` | Treatment day CT phases | Ground-truth volume |
 | `subCT_06_mha.npy` | Reference CT volume | Network input |
-| `sub_PTV_mha.npy` | Planning target volume | Deformation source |
+| `itv_PTV_mha.npy` | Planning target volume | Deformation source |
 | `RespBin.csv` | Breathing phase per projection (680×1) | Phase mapping |
 | `Angles.csv` | Gantry angles per projection (680×1) | Temporal analysis |
 
