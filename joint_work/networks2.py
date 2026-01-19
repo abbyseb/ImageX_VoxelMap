@@ -6,11 +6,11 @@ from utilities.modelio import LoadableModel, store_config_args
 
 
 class ProjectionEmbedder(nn.Module):
-    """Embeds 2D projection into feature space compatible with 3D volumes"""
+    """Embeds 2D projection(s) into feature space compatible with 3D volumes."""
 
-    def __init__(self, out_channels):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv1 = nn.Conv2d(1, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(out_channels)
         self.activation = nn.ReLU(inplace=True)
@@ -92,24 +92,24 @@ class Decoder3D(nn.Module):
 class SingleEncoderDualDecoder(LoadableModel):
     """
     Single encoder with separate motion and image decoders.
-    Motion decoder trained first, then image decoder.
-    Features from motion decoder concatenated with encoder features for image decoder.
-    Outputs single motion field at full resolution.
+    Supports either staged training (motion/image modes) or fully joint
+    training where both decoders run in a single forward pass.
     """
 
     @store_config_args
-    def __init__(self, im_size, int_steps=7, skip_connections=False):
+    def __init__(self, im_size, int_steps=7, skip_connections=False, proj_in_channels=2):
         super().__init__()
         
         self.im_size = im_size
         self.skip_connections = skip_connections
+        self.proj_in_channels = proj_in_channels
         
         # Build feature dimensions
         enc_nf = [2 ** nb for nb in range(2, int(np.log2(im_size)) + 2)]
         self.enc_nf = enc_nf
         
         # Projection embedder
-        self.proj_embedder = ProjectionEmbedder(enc_nf[0])
+        self.proj_embedder = ProjectionEmbedder(proj_in_channels, enc_nf[0])
         
         # Single shared encoder
         self.encoder = Encoder3D(enc_nf[0] + 1, enc_nf)
@@ -138,7 +138,7 @@ class SingleEncoderDualDecoder(LoadableModel):
                 prev_nf = current_dec_nf
             
             self.image_decoder_extras = nn.ModuleList()
-            self.image_decoder_extras.append(ExtraBlock(prev_nf, 3))
+            self.image_decoder_extras.append(ExtraBlock(prev_nf, 1))
         else:
             # Without skip connections: just concatenate motion decoder features
             self.image_decoder_uparm = nn.ModuleList()
@@ -157,7 +157,7 @@ class SingleEncoderDualDecoder(LoadableModel):
                 prev_nf = current_dec_nf
             
             self.image_decoder_extras = nn.ModuleList()
-            self.image_decoder_extras.append(ExtraBlock(prev_nf, 3))
+            self.image_decoder_extras.append(ExtraBlock(prev_nf, 1))
         
         # Flow integrator (single level at full resolution)
         vol_shape = [im_size, im_size, im_size]
@@ -166,16 +166,45 @@ class SingleEncoderDualDecoder(LoadableModel):
         # Final transformer
         self.final_transformer = layers.SpatialTransformer(vol_shape)
 
-    def forward(self, target_proj, source_vol, mode='motion'):
+    def _run_image_decoder(self, x_enc, motion_decoder_features, detach_motion_features: bool):
+        """
+        Runs the image decoder branch, optionally detaching motion features to
+        prevent gradients from flowing back through the motion decoder.
+        """
+        x = x_enc[-1]
+        for i, layer in enumerate(self.image_decoder_uparm):
+            if i > 0:
+                features_to_concat = [x]
+                if self.skip_connections:
+                    skip_idx = -(i + 1)
+                    features_to_concat.append(x_enc[skip_idx])
+
+                motion_feat = motion_decoder_features[i]
+                if detach_motion_features:
+                    motion_feat = motion_feat.detach()
+                features_to_concat.append(motion_feat)
+                x = torch.cat(features_to_concat, dim=1)
+            x = layer(x)
+
+        for layer in self.image_decoder_extras:
+            x = layer(x)
+        return x
+
+    def forward(self, source_proj, target_proj, source_vol, mode='motion'):
         """
         Args:
-            mode: 'motion' for training motion decoder, 'image' for training image decoder
+            mode: 'motion', 'image', or 'joint'
         Returns:
-            y_source: warped source volume
-            flow: motion field (integrated if int_steps > 0)
+            Depending on the mode:
+              - 'motion'/'image': (warped_volume, flow)
+              - 'joint': dict with motion/image sub-dicts containing volume+flow
         """
-        # Embed projection
-        target_feat = self.proj_embedder(target_proj)
+        if target_proj is None:
+            raise ValueError("target_proj must be provided for dual-decoder models.")
+
+        # Combine projections and embed
+        proj_pair = torch.cat([source_proj, target_proj], dim=1)
+        target_feat = self.proj_embedder(proj_pair)
         target_feat = target_feat.unsqueeze(2)
         depth = source_vol.shape[2]
         target_feat = target_feat.expand(-1, -1, depth, -1, -1)
@@ -183,59 +212,42 @@ class SingleEncoderDualDecoder(LoadableModel):
         # Concatenate and encode
         x = torch.cat([target_feat, source_vol], dim=1)
         x_enc = self.encoder(x)
-        
+
         if mode == 'motion':
-            # Motion decoder path
-            flow, motion_decoder_features = self.motion_decoder(x_enc)
-            
-            # Integrate flow if needed
+            flow, _ = self.motion_decoder(x_enc)
             if self.integrator is not None:
                 flow = self.integrator(flow)
-            
-            # Warp source volume
             y_source = self.final_transformer(source_vol, flow)
-            
             return y_source, flow
-        
-        elif mode == 'image':
-            # Get motion decoder features (frozen)
+
+        if mode == 'image':
             with torch.no_grad():
                 _, motion_decoder_features = self.motion_decoder(x_enc)
-            
-            # Image decoder with concatenated features
-            x = x_enc[-1]  # Start from bottleneck
-            
-            for i, layer in enumerate(self.image_decoder_uparm):
-                if i > 0:
-                    # Concatenate features at this resolution level
-                    features_to_concat = [x]
-                    
-                    if self.skip_connections:
-                        # Add encoder skip connection
-                        skip_idx = -(i+1)
-                        features_to_concat.append(x_enc[skip_idx])
-                    
-                    # Add motion decoder feature
-                    features_to_concat.append(motion_decoder_features[i])
-                    
-                    x = torch.cat(features_to_concat, dim=1)
-                
-                x = layer(x)
-            
-            # Final extra blocks
-            for layer in self.image_decoder_extras:
-                x = layer(x)
-            
-            flow = x
-            
-            # Integrate flow if needed
+            synth_volume = self._run_image_decoder(
+                x_enc,
+                motion_decoder_features,
+                detach_motion_features=True,
+            )
+            return synth_volume, None
+
+        if mode == 'joint':
+            motion_flow, motion_decoder_features = self.motion_decoder(x_enc)
             if self.integrator is not None:
-                flow = self.integrator(flow)
-            
-            # Warp source volume
-            y_source = self.final_transformer(source_vol, flow)
-            
-            return y_source, flow
+                motion_flow = self.integrator(motion_flow)
+            motion_volume = self.final_transformer(source_vol, motion_flow)
+
+            synth_volume = self._run_image_decoder(
+                x_enc,
+                motion_decoder_features,
+                detach_motion_features=False,
+            )
+
+            return {
+                'motion': {'volume': motion_volume, 'flow': motion_flow},
+                'image': {'volume': synth_volume},
+            }
+
+        raise ValueError(f"Unsupported mode '{mode}'.")
 
 
 # ============================================================================
@@ -251,7 +263,7 @@ class DualEncoderDualDecoder(LoadableModel):
     """
 
     @store_config_args
-    def __init__(self, im_size, int_steps=7, skip_connections=False):
+    def __init__(self, im_size, int_steps=7, skip_connections=False, proj_in_channels=2):
         super().__init__()
         
         self.im_size = im_size
@@ -262,7 +274,7 @@ class DualEncoderDualDecoder(LoadableModel):
         self.enc_nf = enc_nf
         
         # Projection embedder
-        self.proj_embedder = ProjectionEmbedder(enc_nf[0])
+        self.proj_embedder = ProjectionEmbedder(proj_in_channels, enc_nf[0])
         
         # Motion encoder-decoder
         self.motion_encoder = Encoder3D(enc_nf[0] + 1, enc_nf)
@@ -317,7 +329,7 @@ class DualEncoderDualDecoder(LoadableModel):
         # Final transformer
         self.final_transformer = layers.SpatialTransformer(vol_shape)
 
-    def forward(self, target_proj, source_vol, mode='motion'):
+    def forward(self, source_proj, target_proj, source_vol, mode='motion'):
         """
         Args:
             mode: 'motion' for training motion network, 'image' for training image network
@@ -326,7 +338,8 @@ class DualEncoderDualDecoder(LoadableModel):
             flow: motion field (integrated if int_steps > 0)
         """
         # Embed projection
-        target_feat = self.proj_embedder(target_proj)
+        proj_pair = torch.cat([source_proj, target_proj], dim=1)
+        target_feat = self.proj_embedder(proj_pair)
         target_feat = target_feat.unsqueeze(2)
         depth = source_vol.shape[2]
         target_feat = target_feat.expand(-1, -1, depth, -1, -1)
@@ -401,7 +414,7 @@ class OriginalModel(LoadableModel):
     """Original single encoder-decoder architecture"""
 
     @store_config_args
-    def __init__(self, im_size, int_steps=7):
+    def __init__(self, im_size, int_steps=7, proj_in_channels=2):
         super().__init__()
         
         self.im_size = im_size
@@ -409,7 +422,7 @@ class OriginalModel(LoadableModel):
         enc_nf = [2 ** nb for nb in range(2, int(np.log2(im_size)) + 2)]
         self.enc_nf = enc_nf
         
-        self.proj_embedder = ProjectionEmbedder(enc_nf[0])
+        self.proj_embedder = ProjectionEmbedder(proj_in_channels, enc_nf[0])
         self.encoder = Encoder3D(enc_nf[0] + 1, enc_nf)
         self.decoder = Decoder3D(enc_nf, out_channels=3)
         
@@ -420,8 +433,9 @@ class OriginalModel(LoadableModel):
         # Final transformer
         self.final_transformer = layers.SpatialTransformer(vol_shape)
 
-    def forward(self, target_proj, source_vol, mode='motion'):
-        target_feat = self.proj_embedder(target_proj)
+    def forward(self, source_proj, target_proj, source_vol, mode='motion'):
+        proj_pair = torch.cat([source_proj, target_proj], dim=1)
+        target_feat = self.proj_embedder(proj_pair)
         target_feat = target_feat.unsqueeze(2)
         depth = source_vol.shape[2]
         target_feat = target_feat.expand(-1, -1, depth, -1, -1)
