@@ -323,3 +323,43 @@ class jacobian_determinant:
 
             return Jdet
 
+
+class image_l1:
+    """
+    Computes the L1 distance between a predicted and ground-truth image/volume.
+    """
+
+    def __init__(self, reduction: str = "mean"):
+        self.reduction = reduction
+
+    def loss(self, target_vol, predict_vol):
+        error = torch.abs(target_vol - predict_vol)
+        if self.reduction == "sum":
+            return torch.sum(error)
+        if self.reduction == "none":
+            return error
+        return torch.mean(error)
+
+
+class motion_image_joint_loss:
+    """
+    Combines supervised motion loss (L2 on flow) with auxiliary image L1 loss.
+    Returns total loss along with individual components for logging.
+    """
+
+    def __init__(self, lambda_image: float = 0.1, motion_loss_fn=None, image_loss_fn=None):
+        self.lambda_image = lambda_image
+        self._motion_loss_fn = motion_loss_fn or flow()
+        self._image_loss_fn = image_loss_fn or image_l1()
+
+    def loss(self, target_flow, predict_flow, target_volume, predict_volume, mask=None):
+        if mask is not None:
+            try:
+                motion_loss = self._motion_loss_fn.loss(target_flow, predict_flow, mask)
+            except TypeError:
+                motion_loss = self._motion_loss_fn.loss(target_flow, predict_flow)
+        else:
+            motion_loss = self._motion_loss_fn.loss(target_flow, predict_flow)
+        image_loss = self._image_loss_fn.loss(target_volume, predict_volume)
+        total_loss = motion_loss + (self.lambda_image * image_loss)
+        return total_loss, motion_loss, image_loss
