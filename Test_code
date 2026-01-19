@@ -1,0 +1,54 @@
+print("\n===== TEST SUMMARY =====")
+
+# Convert to numpy
+tar_lr_np  = np.asarray(tar_lr, dtype=float)
+tar_si_np  = np.asarray(tar_si, dtype=float)
+tar_ap_np  = np.asarray(tar_ap, dtype=float)
+
+pred_lr_np = np.asarray(pred_lr, dtype=float)
+pred_si_np = np.asarray(pred_si, dtype=float)
+pred_ap_np = np.asarray(pred_ap, dtype=float)
+
+test_dice_np = np.asarray(test_dice, dtype=float)
+test_detJ_np = np.asarray(test_detJ, dtype=float)
+
+test_mse_np  = np.asarray(test_mse, dtype=float)
+test_ssim_np = np.asarray(test_ssim, dtype=float)
+test_psnr_np = np.asarray(test_psnr, dtype=float)
+
+# ----------------------------
+# Motion error (centroid-based)
+# ----------------------------
+err_3d = np.sqrt(
+    (tar_lr_np - pred_lr_np) ** 2 +
+    (tar_si_np - pred_si_np) ** 2 +
+    (tar_ap_np - pred_ap_np) ** 2
+)
+
+print("\n--- Motion Tracking (Centroid) ---")
+print(f"3D Error (mm):   {np.mean(err_3d):.2f} ± {np.std(err_3d):.2f}")
+
+print("Axis-wise absolute error (mm):")
+print(f"  LR: {np.mean(np.abs(tar_lr_np - pred_lr_np)):.2f} ± {np.std(np.abs(tar_lr_np - pred_lr_np)):.2f}")
+print(f"  SI: {np.mean(np.abs(tar_si_np - pred_si_np)):.2f} ± {np.std(np.abs(tar_si_np - pred_si_np)):.2f}")
+print(f"  AP: {np.mean(np.abs(tar_ap_np - pred_ap_np)):.2f} ± {np.std(np.abs(tar_ap_np - pred_ap_np)):.2f}")
+
+# ----------------------------
+# PTV overlap
+# ----------------------------
+print("\n--- PTV Overlap ---")
+print(f"Dice:            {np.mean(test_dice_np):.3f} ± {np.std(test_dice_np):.3f}")
+
+# ----------------------------
+# DVF regularity
+# ----------------------------
+print("\n--- DVF Regularity ---")
+print(f"detJ ≤ 0 ratio:  {np.mean(test_detJ_np):.2e} ± {np.std(test_detJ_np):.2e}")
+
+# ----------------------------
+# Image similarity (warped volume)
+# ----------------------------
+print("\n--- Image Similarity (Warped Source → Target) ---")
+print(f"MSE:             {np.mean(test_mse_np):.4e} ± {np.std(test_mse_np):.4e}")
+print(f"SSIM:            {np.mean(test_ssim_np):.4f} ± {np.std(test_ssim_np):.4f}")
+print(f"PSNR (dB):       {np.mean(test_psnr_np):.2f} ± {np.std(test_psnr_np):.2f}")
